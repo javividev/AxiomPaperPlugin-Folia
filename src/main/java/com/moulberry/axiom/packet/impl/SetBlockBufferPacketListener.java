@@ -92,7 +92,13 @@ public class SetBlockBufferPacketListener implements PacketHandler {
                 boolean allowNbt = this.plugin.hasPermission(player.getBukkitEntity(), AxiomPermission.BUILD_NBT);
                 this.plugin.addPendingOperation(world, new SetBlockBufferOperation(player, buffer, allowNbt));
             } catch (Throwable t) {
-                player.getBukkitEntity().kick(net.kyori.adventure.text.Component.text("An error occured while processing block change: " + t.getMessage()));
+                String errorMsg = t.getMessage();
+                if (errorMsg == null || errorMsg.isEmpty()) {
+                    errorMsg = t.getClass().getSimpleName();
+                }
+                plugin.getLogger().severe("Error processing set_buffer: " + errorMsg);
+                t.printStackTrace();
+                player.getBukkitEntity().kick(net.kyori.adventure.text.Component.text("An error occurred while processing block change: " + errorMsg));
             }
         });
     }
@@ -160,7 +166,13 @@ public class SetBlockBufferPacketListener implements PacketHandler {
                 }
                 map.forEach((serverPlayer, list) -> serverPlayer.connection.send(ClientboundChunksBiomesPacket.forChunks(list)));
             } catch (Throwable t) {
-                player.getBukkitEntity().kick(net.kyori.adventure.text.Component.text("An error occured while processing biome change: " + t.getMessage()));
+                String errorMsg = t.getMessage();
+                if (errorMsg == null || errorMsg.isEmpty()) {
+                    errorMsg = t.getClass().getSimpleName();
+                }
+                plugin.getLogger().severe("Error processing biome_buffer: " + errorMsg);
+                t.printStackTrace();
+                player.getBukkitEntity().kick(net.kyori.adventure.text.Component.text("An error occurred while processing biome change: " + errorMsg));
             }
         });
     }
