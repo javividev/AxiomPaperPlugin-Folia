@@ -79,9 +79,9 @@ public class AxiomPaper extends JavaPlugin implements Listener {
     public final Map<UUID, Restrictions> playerRestrictions = new ConcurrentHashMap<>();
     public final Map<UUID, IdMapper<BlockState>> playerBlockRegistry = new ConcurrentHashMap<>();
     public final Map<UUID, Integer> playerProtocolVersion = new ConcurrentHashMap<>();
-    private final Map<UUID, AxiomPermissionSet> playerPermissions = new HashMap<>();
-    private final Map<UUID, PlotSquaredIntegration.PlotBounds> lastPlotBoundsForPlayers = new HashMap<>();
-    private final Set<UUID> noPhysicalTriggerPlayers = new HashSet<>();
+    private final Map<UUID, AxiomPermissionSet> playerPermissions = new ConcurrentHashMap<>();
+    private final Map<UUID, PlotSquaredIntegration.PlotBounds> lastPlotBoundsForPlayers = new ConcurrentHashMap<>();
+    private final Set<UUID> noPhysicalTriggerPlayers = Collections.newSetFromMap(new ConcurrentHashMap<>());
     private final OperationQueue operationQueue = new OperationQueue();
     private final Object2IntOpenHashMap<UUID> availableDispatchSends = new Object2IntOpenHashMap<>();
     public Configuration configuration;
@@ -244,7 +244,7 @@ public class AxiomPaper extends JavaPlugin implements Listener {
         } catch (IOException ignored) {}
         ServerHeightmaps.load(heightmapsPath);
 
-        Bukkit.getScheduler().scheduleSyncRepeatingTask(this, this::tick, 1, 1);
+        Bukkit.getGlobalRegionScheduler().runAtFixedRate(this, task -> tick(), 1, 1);
 
         this.sendMarkers = this.configuration.getBoolean("send-markers");
         this.maxChunkRelightsPerTick = this.configuration.getInt("max-chunk-relights-per-tick");
@@ -404,8 +404,14 @@ public class AxiomPaper extends JavaPlugin implements Listener {
             Set<UUID> stillActiveAxiomPlayers = new HashSet<>();
             Set<UUID> stillFailedAxiomPlayers = new HashSet<>();
 
-            for (Player player : Bukkit.getServer().getOnlinePlayers()) {
-                UUID uuid = player.getUniqueId();
+            Set<UUID> allPlayersToCheck = new HashSet<>();
+            allPlayersToCheck.addAll(this.activeAxiomPlayers);
+            allPlayersToCheck.addAll(this.failedPermissionAxiomPlayers);
+
+            for (UUID uuid : allPlayersToCheck) {
+                Player player = Bukkit.getPlayer(uuid);
+                if (player == null) continue;
+
                 if (this.activeAxiomPlayers.contains(uuid)) {
                     if (!this.hasPermission(player, AxiomPermission.USE)) {
                         FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());

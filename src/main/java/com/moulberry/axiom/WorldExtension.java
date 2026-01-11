@@ -26,10 +26,11 @@ import org.bukkit.craftbukkit.entity.CraftPlayer;
 import org.bukkit.entity.Player;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class WorldExtension {
 
-    private static final Map<ResourceKey<Level>, WorldExtension> extensions = new HashMap<>();
+    private static final Map<ResourceKey<Level>, WorldExtension> extensions = new ConcurrentHashMap<>();
 
     public static WorldExtension get(ServerLevel serverLevel) {
         WorldExtension extension = extensions.computeIfAbsent(serverLevel.dimension(), k -> new WorldExtension());
