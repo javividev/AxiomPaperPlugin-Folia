@@ -234,8 +234,16 @@ public class SetBlockBufferOperation implements PendingOperation {
                                 Optional<Holder<PoiType>> newPoi = containerMaybeHasPoi ? PoiTypes.forState(blockState) : Optional.empty();
                                 Optional<Holder<PoiType>> oldPoi = sectionMaybeHasPoi ? PoiTypes.forState(old) : Optional.empty();
                                 if (!Objects.equals(oldPoi, newPoi)) {
-                                    if (oldPoi.isPresent()) level.getPoiManager().remove(blockPos);
-                                    if (newPoi.isPresent()) level.getPoiManager().add(blockPos, newPoi.get());
+                                    try {
+                                        if (oldPoi.isPresent()) level.getPoiManager().remove(blockPos);
+                                        if (newPoi.isPresent()) level.getPoiManager().add(blockPos, newPoi.get());
+                                    } catch (Throwable t) {
+                                        // POI operations must be on region thread in Folia - skip for now
+                                        // The POI will be updated when the chunk is naturally reloaded
+                                        if (!t.getClass().getName().contains("WrongThreadException")) {
+                                            throw t;
+                                        }
+                                    }
                                 }
                             }
 
