@@ -259,16 +259,24 @@ public class SetBlockBufferOperation implements PendingOperation {
                                         if (!t.getClass().getName().contains("WrongThreadException") && !t.getClass().getName().contains("TickThread")) {
                                             throw t;
                                         }
+                                        // Force remove by setting to null in the internal map
+                                        try {
+                                            chunk.blockEntities.remove(blockPos);
+                                        } catch (Throwable ignored) {}
                                     }
 
                                     blockEntity = ((EntityBlock)block).newBlockEntity(blockPos, blockState);
                                     if (blockEntity != null) {
                                         try {
                                             chunk.addAndRegisterBlockEntity(blockEntity);
-                                        } catch (Throwable t) {
-                                            if (!t.getClass().getName().contains("WrongThreadException") && !t.getClass().getName().contains("TickThread")) {
-                                                throw t;
+                                        } catch (Throwable t2) {
+                                            if (!t2.getClass().getName().contains("WrongThreadException") && !t2.getClass().getName().contains("TickThread")) {
+                                                throw t2;
                                             }
+                                            // Force add to internal map
+                                            try {
+                                                chunk.blockEntities.put(blockPos, blockEntity);
+                                            } catch (Throwable ignored) {}
                                         }
                                     }
                                 }
@@ -292,6 +300,10 @@ public class SetBlockBufferOperation implements PendingOperation {
                                     if (!t.getClass().getName().contains("WrongThreadException") && !t.getClass().getName().contains("TickThread")) {
                                         throw t;
                                     }
+                                    // Force remove by setting to null in the internal map
+                                    try {
+                                        chunk.blockEntities.remove(blockPos);
+                                    } catch (Throwable ignored) {}
                                 }
                             }
 
