@@ -253,11 +253,23 @@ public class SetBlockBufferOperation implements PendingOperation {
                                     AxiomReflection.updateBlockEntityTicker(chunk, blockEntity);
                                 } else {
                                     // Block entity type isn't correct, we need to recreate it
-                                    chunk.removeBlockEntity(blockPos);
+                                    try {
+                                        chunk.removeBlockEntity(blockPos);
+                                    } catch (Throwable t) {
+                                        if (!t.getClass().getName().contains("WrongThreadException") && !t.getClass().getName().contains("TickThread")) {
+                                            throw t;
+                                        }
+                                    }
 
                                     blockEntity = ((EntityBlock)block).newBlockEntity(blockPos, blockState);
                                     if (blockEntity != null) {
-                                        chunk.addAndRegisterBlockEntity(blockEntity);
+                                        try {
+                                            chunk.addAndRegisterBlockEntity(blockEntity);
+                                        } catch (Throwable t) {
+                                            if (!t.getClass().getName().contains("WrongThreadException") && !t.getClass().getName().contains("TickThread")) {
+                                                throw t;
+                                            }
+                                        }
                                     }
                                 }
                                 if (blockEntity != null && blockEntityChunkMap != null) {
@@ -274,7 +286,13 @@ public class SetBlockBufferOperation implements PendingOperation {
                                     }
                                 }
                             } else if (old.hasBlockEntity()) {
-                                chunk.removeBlockEntity(blockPos);
+                                try {
+                                    chunk.removeBlockEntity(blockPos);
+                                } catch (Throwable t) {
+                                    if (!t.getClass().getName().contains("WrongThreadException") && !t.getClass().getName().contains("TickThread")) {
+                                        throw t;
+                                    }
+                                }
                             }
 
                             if (CoreProtectIntegration.isEnabled() && old != blockState) {
