@@ -23,7 +23,12 @@ public class WrapperPacketListener implements PluginMessageListener {
         try {
             this.packetHandler.onReceive(player, friendlyByteBuf);
         } catch (Throwable t) {
-            player.kick(Component.text("Error while processing packet " + s + ": " + t.getMessage()));
+            String errorMsg = t.getMessage();
+            if (errorMsg == null || errorMsg.isEmpty()) {
+                errorMsg = t.getClass().getSimpleName();
+            }
+            t.printStackTrace();
+            player.kick(Component.text("Error while processing packet " + s + ": " + errorMsg));
         }
     }
 }
