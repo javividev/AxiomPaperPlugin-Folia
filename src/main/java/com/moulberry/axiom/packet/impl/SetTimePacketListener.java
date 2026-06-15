@@ -5,8 +5,6 @@ import com.moulberry.axiom.event.AxiomTimeChangeEvent;
 import com.moulberry.axiom.integration.plotsquared.PlotSquaredIntegration;
 import com.moulberry.axiom.packet.PacketHandler;
 import com.moulberry.axiom.restrictions.AxiomPermission;
-import io.netty.buffer.Unpooled;
-import net.kyori.adventure.text.Component;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.RegistryFriendlyByteBuf;
@@ -17,8 +15,6 @@ import net.minecraft.world.level.Level;
 import org.bukkit.Bukkit;
 import org.bukkit.craftbukkit.CraftWorld;
 import org.bukkit.entity.Player;
-import org.bukkit.plugin.messaging.PluginMessageListener;
-import org.jetbrains.annotations.NotNull;
 
 public class SetTimePacketListener implements PacketHandler {
 
@@ -57,9 +53,30 @@ public class SetTimePacketListener implements PacketHandler {
         Bukkit.getPluginManager().callEvent(timeChangeEvent);
         if (timeChangeEvent.isCancelled()) return;
 
-        // Change time
-        if (time != null) level.setDayTime(time);
-        if (freezeTime != null) level.getGameRules().set(GameRules.ADVANCE_TIME, !freezeTime, null);
+        if (time != null) {
+            level.setDayTime(time);
+        }
+        if (freezeTime != null) {
+            Player p = player;
+            ResourceKey<Level> dimension = key;
+            boolean advanceTime = !freezeTime;
+            Bukkit.getGlobalRegionScheduler().execute(this.plugin, () -> {
+                if (!p.isOnline()) {
+                    return;
+                }
+                ServerLevel lvl = ((CraftWorld) p.getWorld()).getHandle();
+                if (!lvl.dimension().equals(dimension)) {
+                    return;
+                }
+                if (PlotSquaredIntegration.isPlotWorld(p.getWorld())) {
+                    return;
+                }
+                if (!this.plugin.canModifyWorld(p, p.getWorld())) {
+                    return;
+                }
+                lvl.getGameRules().set(GameRules.ADVANCE_TIME, advanceTime, null);
+            });
+        }
     }
 
 }

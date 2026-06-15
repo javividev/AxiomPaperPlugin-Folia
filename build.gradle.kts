@@ -40,6 +40,7 @@ repositories {
 
 dependencies {
     paperweight.paperDevBundle("1.21.11-R0.1-SNAPSHOT")
+    implementation(platform(libs.cloud.minecraft.bom))
     implementation(libs.reflection.remapper)
     implementation(libs.cloud.paper)
 
@@ -65,6 +66,14 @@ dependencies {
 }
 
 tasks {
+    // El JAR sin sombrear no incluye cloud-paper ni otras libs; el despliegue debe ser el shadow (clf. vacío).
+    jar {
+        archiveClassifier.set("unshaded")
+    }
+    shadowJar {
+        archiveClassifier.set("")
+        mergeServiceFiles()
+    }
     assemble {
         dependsOn(shadowJar)
     }

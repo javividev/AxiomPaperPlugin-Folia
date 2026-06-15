@@ -25,6 +25,7 @@ import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.storage.TagValueInput;
 import net.minecraft.world.level.storage.TagValueOutput;
 import net.minecraft.world.phys.Vec3;
+import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.craftbukkit.CraftWorld;
 import org.bukkit.entity.Player;
@@ -112,117 +113,122 @@ public class ManipulateEntityPacketListener implements PacketHandler {
                 continue;
             }
 
-            AxiomManipulateEntityEvent manipulateEvent = new AxiomManipulateEntityEvent(player, entity.getBukkitEntity());
-            if (!manipulateEvent.callEvent()) {
-                continue;
-            }
+            int cx = containing.getX() >> 4;
+            int cz = containing.getZ() >> 4;
 
-            if (entry.merge != null && !entry.merge.isEmpty()) {
-                NbtSanitization.sanitizeEntity(entry.merge);
-
-                var valueOutput = TagValueOutput.createWithContext(ProblemReporter.DISCARDING, entity.registryAccess());
-                entity.saveWithoutId(valueOutput);
-                CompoundTag compoundTag = valueOutput.buildResult();
-
-                compoundTag = merge(compoundTag, entry.merge);
-
-                var valueInput = TagValueInput.create(ProblemReporter.DISCARDING, entity.registryAccess(), compoundTag);
-                entity.load(valueInput);
-            }
-
-            entity.setPosRaw(position.x, position.y, position.z);
-
-            Vec3 entryPos = entry.position();
-            if (entryPos != null && entry.relativeMovementSet != null) {
-                double newX = entry.relativeMovementSet.contains(Relative.X) ? entity.position().x + entryPos.x : entryPos.x;
-                double newY = entry.relativeMovementSet.contains(Relative.Y) ? entity.position().y + entryPos.y : entryPos.y;
-                double newZ = entry.relativeMovementSet.contains(Relative.Z) ? entity.position().z + entryPos.z : entryPos.z;
-                float newYaw = entry.relativeMovementSet.contains(Relative.Y_ROT) ? entity.getYRot() + entry.yaw : entry.yaw;
-                float newPitch = entry.relativeMovementSet.contains(Relative.X_ROT) ? entity.getXRot() + entry.pitch : entry.pitch;
-
-                if (entity instanceof HangingEntity hangingEntity) {
-                    float changedYaw = newYaw - entity.getYRot();
-                    int rotations = Math.round(changedYaw / 90);
-                    hangingEntity.rotate(ROTATION_VALUES[rotations & 3]);
-
-                    if (entity instanceof ItemFrame itemFrame && itemFrame.getDirection().getAxis() == Direction.Axis.Y) {
-                        itemFrame.setRotation(itemFrame.getRotation() - Math.round(changedYaw / 45));
-                    }
+            Bukkit.getRegionScheduler().run(this.plugin, player.getWorld(), cx, cz, task -> {
+                AxiomManipulateEntityEvent manipulateEvent = new AxiomManipulateEntityEvent(player, entity.getBukkitEntity());
+                if (!manipulateEvent.callEvent()) {
+                    return;
                 }
 
-                containing = BlockPos.containing(newX, newY, newZ);
+                if (entry.merge != null && !entry.merge.isEmpty()) {
+                    NbtSanitization.sanitizeEntity(entry.merge);
 
-                if (Integration.canPlaceBlock(player, new Location(player.getWorld(),
-                        containing.getX(), containing.getY(), containing.getZ()))) {
-                    if (entity.isPassenger()) {
-                        entity.setYRot(newYaw);
-                        entity.setXRot(newPitch);
-                    } else {
-                        entity.snapTo(newX, newY, newZ, newYaw, newPitch);
-                    }
+                    var valueOutput = TagValueOutput.createWithContext(ProblemReporter.DISCARDING, entity.registryAccess());
+                    entity.saveWithoutId(valueOutput);
+                    CompoundTag compoundTag = valueOutput.buildResult();
+
+                    compoundTag = merge(compoundTag, entry.merge);
+
+                    var valueInput = TagValueInput.create(ProblemReporter.DISCARDING, entity.registryAccess(), compoundTag);
+                    entity.load(valueInput);
                 }
 
-                entity.setYHeadRot(newYaw);
-            }
+                entity.setPosRaw(position.x, position.y, position.z);
 
-            if (canManipulatePassengers(entity)) {
-                switch (entry.passengerManipulation) {
-                    case NONE -> {}
-                    case REMOVE_ALL -> entity.ejectPassengers();
-                    case ADD_LIST -> {
-                        for (UUID passengerUuid : entry.passengers) {
-                            Entity passenger = serverLevel.getEntity(passengerUuid);
+                Vec3 entryPos = entry.position();
+                if (entryPos != null && entry.relativeMovementSet != null) {
+                    double newX = entry.relativeMovementSet.contains(Relative.X) ? entity.position().x + entryPos.x : entryPos.x;
+                    double newY = entry.relativeMovementSet.contains(Relative.Y) ? entity.position().y + entryPos.y : entryPos.y;
+                    double newZ = entry.relativeMovementSet.contains(Relative.Z) ? entity.position().z + entryPos.z : entryPos.z;
+                    float newYaw = entry.relativeMovementSet.contains(Relative.Y_ROT) ? entity.getYRot() + entry.yaw : entry.yaw;
+                    float newPitch = entry.relativeMovementSet.contains(Relative.X_ROT) ? entity.getXRot() + entry.pitch : entry.pitch;
 
-                            if (passenger == null || passenger.isPassenger()) {
-                                continue;
-                            }
-                            if (!canManipulatePassengers(passenger) || passenger.hasPassenger(ManipulateEntityPacketListener::cannotManipulatePassengers)) {
-                                continue;
-                            }
-                            if (!this.plugin.canEntityBeManipulated(passenger.getType())) {
-                                continue;
-                            }
+                    if (entity instanceof HangingEntity hangingEntity) {
+                        float changedYaw = newYaw - entity.getYRot();
+                        int rotations = Math.round(changedYaw / 90);
+                        hangingEntity.rotate(ROTATION_VALUES[rotations & 3]);
 
-                            // Prevent mounting loop
-                            if (passenger.getSelfAndPassengers().anyMatch(entity2 -> entity2 == entity)) {
-                                continue;
-                            }
-
-                            position = passenger.position();
-                            containing = BlockPos.containing(position.x, position.y, position.z);
-
-                            if (!Integration.canPlaceBlock(player, new Location(player.getWorld(),
-                                containing.getX(), containing.getY(), containing.getZ()))) {
-                                continue;
-                            }
-
-                            passenger.startRiding(entity, true, false);
+                        if (entity instanceof ItemFrame itemFrame && itemFrame.getDirection().getAxis() == Direction.Axis.Y) {
+                            itemFrame.setRotation(itemFrame.getRotation() - Math.round(changedYaw / 45));
                         }
                     }
-                    case REMOVE_LIST -> {
-                        for (UUID passengerUuid : entry.passengers) {
-                            Entity passenger = serverLevel.getEntity(passengerUuid);
-                            if (passenger == null || passenger == entity) {
-                                continue;
-                            }
-                            if (!canManipulatePassengers(passenger) || passenger.hasPassenger(ManipulateEntityPacketListener::cannotManipulatePassengers)) {
-                                continue;
-                            }
-                            if (!this.plugin.canEntityBeManipulated(passenger.getType())) {
-                                continue;
-                            }
 
-                            Entity vehicle = passenger.getVehicle();
-                            if (vehicle == entity) {
-                                passenger.stopRiding();
+                    BlockPos newContaining = BlockPos.containing(newX, newY, newZ);
+
+                    if (Integration.canPlaceBlock(player, new Location(player.getWorld(),
+                            newContaining.getX(), newContaining.getY(), newContaining.getZ()))) {
+                        if (entity.isPassenger()) {
+                            entity.setYRot(newYaw);
+                            entity.setXRot(newPitch);
+                        } else {
+                            entity.snapTo(newX, newY, newZ, newYaw, newPitch);
+                        }
+                    }
+
+                    entity.setYHeadRot(newYaw);
+                }
+
+                if (canManipulatePassengers(entity)) {
+                    switch (entry.passengerManipulation) {
+                        case NONE -> {}
+                        case REMOVE_ALL -> entity.ejectPassengers();
+                        case ADD_LIST -> {
+                            for (UUID passengerUuid : entry.passengers) {
+                                Entity passenger = serverLevel.getEntity(passengerUuid);
+
+                                if (passenger == null || passenger.isPassenger()) {
+                                    continue;
+                                }
+                                if (!canManipulatePassengers(passenger) || passenger.hasPassenger(ManipulateEntityPacketListener::cannotManipulatePassengers)) {
+                                    continue;
+                                }
+                                if (!this.plugin.canEntityBeManipulated(passenger.getType())) {
+                                    continue;
+                                }
+
+                                // Prevent mounting loop
+                                if (passenger.getSelfAndPassengers().anyMatch(entity2 -> entity2 == entity)) {
+                                    continue;
+                                }
+
+                                Vec3 passengerPos = passenger.position();
+                                BlockPos passengerContaining = BlockPos.containing(passengerPos.x, passengerPos.y, passengerPos.z);
+
+                                if (!Integration.canPlaceBlock(player, new Location(player.getWorld(),
+                                    passengerContaining.getX(), passengerContaining.getY(), passengerContaining.getZ()))) {
+                                    continue;
+                                }
+
+                                passenger.startRiding(entity, true, false);
+                            }
+                        }
+                        case REMOVE_LIST -> {
+                            for (UUID passengerUuid : entry.passengers) {
+                                Entity passenger = serverLevel.getEntity(passengerUuid);
+                                if (passenger == null || passenger == entity) {
+                                    continue;
+                                }
+                                if (!canManipulatePassengers(passenger) || passenger.hasPassenger(ManipulateEntityPacketListener::cannotManipulatePassengers)) {
+                                    continue;
+                                }
+                                if (!this.plugin.canEntityBeManipulated(passenger.getType())) {
+                                    continue;
+                                }
+
+                                Entity vehicle = passenger.getVehicle();
+                                if (vehicle == entity) {
+                                    passenger.stopRiding();
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            AxiomAfterManipulateEntityEvent afterManipulateEvent = new AxiomAfterManipulateEntityEvent(player, entity.getBukkitEntity());
-            afterManipulateEvent.callEvent();
+                AxiomAfterManipulateEntityEvent afterManipulateEvent = new AxiomAfterManipulateEntityEvent(player, entity.getBukkitEntity());
+                afterManipulateEvent.callEvent();
+            });
         }
     }
 

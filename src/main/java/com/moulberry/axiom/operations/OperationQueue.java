@@ -1,7 +1,6 @@
 package com.moulberry.axiom.operations;
 
 import net.minecraft.network.chat.Component;
-import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import org.bukkit.World;
@@ -20,13 +19,17 @@ public class OperationQueue {
     private final Lock executionLock = new ReentrantLock();
     private final Map<ServerLevel, List<PendingOperation>> pendingOperations = new HashMap<>();
 
+    /**
+     * Called once per global-scheduler tick from AxiomPaper.tick().
+     * In Folia there is no single "main thread", so we do NOT assert isSameThread().
+     * The executionLock prevents re-entrant calls (e.g. if tick() is somehow called
+     * from two global-scheduler slots simultaneously, which Folia does not do, but
+     * it's cheap insurance).
+     */
     public void tick() {
-        if (!MinecraftServer.getServer().isSameThread()) {
-            throw new WrongThreadException();
-        }
-
-        this.executionLock.lock(); // Just in case we're in some weird Folia environment or something
+        this.executionLock.lock();
         try {
+            // Drain newly-added operations into the active map.
             this.queueLock.lock();
             try {
                 for (Map.Entry<ServerLevel, List<PendingOperation>> entry : this.newPendingOperations.entrySet()) {
@@ -79,20 +82,8 @@ public class OperationQueue {
         try {
             List<PendingOperation> operations = this.newPendingOperations.computeIfAbsent(level, k -> new ArrayList<>());
 
-            if (operations.isEmpty() && MinecraftServer.getServer().isSameThread() && this.executionLock.tryLock()) {
-                try {
-                    var currentOperations = this.pendingOperations.get(level);
-                    if (currentOperations == null || currentOperations.isEmpty()) {
-                        operation.tick(level);
-                        if (operation.isFinished()) {
-                            return;
-                        }
-                    }
-                } finally {
-                    this.executionLock.unlock();
-                }
-            }
-
+            // In Folia there is no concept of "the main thread" that we can fast-path on,
+            // so we always queue the operation normally.
             operations.add(operation);
         } finally {
             this.queueLock.unlock();

@@ -30,6 +30,8 @@ import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.lighting.LightEngine;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.level.ChunkPos;
+import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.block.BlockFace;
@@ -46,6 +48,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -118,129 +121,137 @@ public class SetBlockPacketListener implements PacketHandler {
             }
         }
 
-        // Update blocks
-        if (updateNeighbors) {
-            if (preventUpdatesAt.isEmpty()) {
-                for (Map.Entry<BlockPos, BlockState> entry : blocks.entrySet()) {
-                    BlockPos blockPos = entry.getKey();
-                    BlockState blockState = entry.getValue();
-
-                    if (!canBreakOrPlace(bukkitPlayer, blockState, world, blockPos)) {
-                        continue;
-                    }
-
-                    boolean logPlacement = false;
-
-                    if (CoreProtectIntegration.isEnabled()) {
-                        BlockState old = player.level().getBlockState(blockPos);
-                        if (old != blockState) {
-                            CoreProtectIntegration.logRemoval(bukkitPlayer.getName(), old, world, blockPos);
-                            logPlacement = true;
-                        }
-                    }
-
-                    // Place block
-                    player.level().setBlock(blockPos, blockState, 3);
-
-                    if (logPlacement) {
-                        CoreProtectIntegration.logPlacement(bukkitPlayer.getName(), blockState, world, blockPos);
-                    }
-                }
-            } else {
-                Direction[] directions = Direction.values();
-                BlockPos.MutableBlockPos mutable = new BlockPos.MutableBlockPos();
-                Map<BlockPos, BlockState> delayedSetWithoutUpdates = new LinkedHashMap<>(Math.min(blocks.size(), preventUpdatesAt.size()));
-                for (Map.Entry<BlockPos, BlockState> entry : blocks.entrySet()) {
-                    BlockPos blockPos = entry.getKey();
-                    BlockState blockState = entry.getValue();
-
-                    if (!canBreakOrPlace(bukkitPlayer, blockState, world, blockPos)) {
-                        continue;
-                    }
-
-                    // Check if we have a neighbor that shouldn't receive updates
-                    // Unfortunately this will also prevent updates to ALL the other neighbors,
-                    // but that case is rare enough for it not to matter
-                    boolean updateNeighborsForThisBlock = true;
-                    for (Direction direction : directions) {
-                        if (preventUpdatesAt.contains(mutable.setWithOffset(blockPos, direction))) {
-                            updateNeighborsForThisBlock = false;
-                            break;
-                        }
-                    }
-
-                    if (preventUpdatesAt.contains(blockPos)) {
-                        delayedSetWithoutUpdates.put(blockPos, blockState);
-                        if (!updateNeighborsForThisBlock) {
-                            continue;
-                        }
-                    }
-
-                    boolean logPlacement = false;
-
-                    if (CoreProtectIntegration.isEnabled()) {
-                        BlockState old = player.level().getBlockState(blockPos);
-                        if (old != blockState) {
-                            CoreProtectIntegration.logRemoval(bukkitPlayer.getName(), old, world, blockPos);
-                            logPlacement = true;
-                        }
-                    }
-
-                    player.level().setBlock(blockPos, blockState, updateNeighborsForThisBlock ? 3 : 18);
-
-                    if (logPlacement) {
-                        CoreProtectIntegration.logPlacement(bukkitPlayer.getName(), blockState, world, blockPos);
-                    }
-                }
-                for (Map.Entry<BlockPos, BlockState> entry : delayedSetWithoutUpdates.entrySet()) {
-                    setWithoutUpdates(bukkitPlayer, entry.getValue(), world, entry.getKey(), player);
-                }
-            }
-        } else {
-            for (Map.Entry<BlockPos, BlockState> entry : blocks.entrySet()) {
-                BlockPos blockPos = entry.getKey();
-                BlockState blockState = entry.getValue();
-
-                setWithoutUpdates(bukkitPlayer, blockState, world, blockPos, player);
-            }
+        // Update blocks partition-by-chunk for Folia
+        Map<Long, Map<BlockPos, BlockState>> blocksByChunk = new LinkedHashMap<>();
+        for (Map.Entry<BlockPos, BlockState> entry : blocks.entrySet()) {
+            BlockPos pos = entry.getKey();
+            long chunkKey = ChunkPos.asLong(pos.getX() >> 4, pos.getZ() >> 4);
+            blocksByChunk.computeIfAbsent(chunkKey, k -> new LinkedHashMap<>()).put(pos, entry.getValue());
         }
 
-        if (!breaking) {
-            BlockPos clickedPos = blockPlaceContext.getClickedPos();
+        final Set<BlockPos> finalPreventUpdatesAt = preventUpdatesAt;
+        final BlockPos clickedPos = blockPlaceContext.getClickedPos();
+        final long clickedChunkKey = ChunkPos.asLong(clickedPos.getX() >> 4, clickedPos.getZ() >> 4);
 
-            if (blocks.containsKey(clickedPos)) {
-                // Disallow in unloaded chunks
-                if (!player.level().isLoaded(clickedPos)) {
-                    return;
+        blocksByChunk.forEach((chunkKey, chunkBlocks) -> {
+            int cx = ChunkPos.getX(chunkKey);
+            int cz = ChunkPos.getZ(chunkKey);
+
+            Bukkit.getRegionScheduler().run(this.plugin, bukkitPlayer.getWorld(), cx, cz, t -> {
+                if (updateNeighbors) {
+                    if (finalPreventUpdatesAt.isEmpty()) {
+                        for (Map.Entry<BlockPos, BlockState> entry : chunkBlocks.entrySet()) {
+                            BlockPos blockPos = entry.getKey();
+                            BlockState blockState = entry.getValue();
+
+                            if (!canBreakOrPlace(bukkitPlayer, blockState, world, blockPos)) {
+                                continue;
+                            }
+
+                            boolean logPlacement = false;
+
+                            if (CoreProtectIntegration.isEnabled()) {
+                                BlockState old = player.level().getBlockState(blockPos);
+                                if (old != blockState) {
+                                    CoreProtectIntegration.logRemoval(bukkitPlayer.getName(), old, world, blockPos);
+                                    logPlacement = true;
+                                }
+                            }
+
+                            // Place block
+                            player.level().setBlock(blockPos, blockState, 3);
+
+                            if (logPlacement) {
+                                CoreProtectIntegration.logPlacement(bukkitPlayer.getName(), blockState, world, blockPos);
+                            }
+                        }
+                    } else {
+                        Direction[] directions = Direction.values();
+                        BlockPos.MutableBlockPos mutable = new BlockPos.MutableBlockPos();
+                        Map<BlockPos, BlockState> delayedSetWithoutUpdates = new LinkedHashMap<>(Math.min(chunkBlocks.size(), finalPreventUpdatesAt.size()));
+                        for (Map.Entry<BlockPos, BlockState> entry : chunkBlocks.entrySet()) {
+                            BlockPos blockPos = entry.getKey();
+                            BlockState blockState = entry.getValue();
+
+                            if (!canBreakOrPlace(bukkitPlayer, blockState, world, blockPos)) {
+                                continue;
+                            }
+
+                            // Check if we have a neighbor that shouldn't receive updates
+                            boolean updateNeighborsForThisBlock = true;
+                            for (Direction direction : directions) {
+                                if (finalPreventUpdatesAt.contains(mutable.setWithOffset(blockPos, direction))) {
+                                    updateNeighborsForThisBlock = false;
+                                    break;
+                                }
+                            }
+
+                            if (finalPreventUpdatesAt.contains(blockPos)) {
+                                delayedSetWithoutUpdates.put(blockPos, blockState);
+                                if (!updateNeighborsForThisBlock) {
+                                    continue;
+                                }
+                            }
+
+                            boolean logPlacement = false;
+
+                            if (CoreProtectIntegration.isEnabled()) {
+                                BlockState old = player.level().getBlockState(blockPos);
+                                if (old != blockState) {
+                                    CoreProtectIntegration.logRemoval(bukkitPlayer.getName(), old, world, blockPos);
+                                    logPlacement = true;
+                                }
+                            }
+
+                            player.level().setBlock(blockPos, blockState, updateNeighborsForThisBlock ? 3 : 18);
+
+                            if (logPlacement) {
+                                CoreProtectIntegration.logPlacement(bukkitPlayer.getName(), blockState, world, blockPos);
+                            }
+                        }
+                        for (Map.Entry<BlockPos, BlockState> entry : delayedSetWithoutUpdates.entrySet()) {
+                            setWithoutUpdates(bukkitPlayer, entry.getValue(), world, entry.getKey(), player);
+                        }
+                    }
+                } else {
+                    for (Map.Entry<BlockPos, BlockState> entry : chunkBlocks.entrySet()) {
+                        BlockPos blockPos = entry.getKey();
+                        BlockState blockState = entry.getValue();
+
+                        setWithoutUpdates(bukkitPlayer, blockState, world, blockPos, player);
+                    }
                 }
 
-                BlockState desiredBlockState = blocks.get(clickedPos);
-                BlockState actualBlockState = player.level().getBlockState(clickedPos);
-                Block actualBlock = actualBlockState.getBlock();
+                // Post-placement block entity updates
+                if (!breaking && chunkKey == clickedChunkKey && chunkBlocks.containsKey(clickedPos)) {
+                    // Disallow in unloaded chunks
+                    if (player.level().isLoaded(clickedPos)) {
+                        BlockState desiredBlockState = chunkBlocks.get(clickedPos);
+                        BlockState actualBlockState = player.level().getBlockState(clickedPos);
+                        Block actualBlock = actualBlockState.getBlock();
 
-                // Ensure block is correct
-                if (desiredBlockState == null || desiredBlockState.isAir() || actualBlockState.isAir()) return;
-                if (desiredBlockState.getBlock() != actualBlock) return;
+                        // Ensure block is correct
+                        if (desiredBlockState != null && !desiredBlockState.isAir() && !actualBlockState.isAir() && desiredBlockState.getBlock() == actualBlock) {
+                            // Check plot squared
+                            if (Integration.canPlaceBlock(bukkitPlayer, new Location(world, clickedPos.getX(), clickedPos.getY(), clickedPos.getZ()))) {
+                                ItemStack inHand = player.getItemInHand(hand);
 
-                // Check plot squared
-                if (!Integration.canPlaceBlock(bukkitPlayer, new Location(world, clickedPos.getX(), clickedPos.getY(), clickedPos.getZ()))) {
-                    return;
+                                BlockItem.updateCustomBlockEntityTag(player.level(), player, clickedPos, inHand);
+
+                                BlockEntity blockEntity = player.level().getBlockEntity(clickedPos);
+                                if (blockEntity != null) {
+                                    blockEntity.applyComponentsFromItemStack(inHand);
+                                }
+
+                                if (!(actualBlock instanceof BedBlock) && !(actualBlock instanceof DoublePlantBlock) && !(actualBlock instanceof DoorBlock)) {
+                                    actualBlock.setPlacedBy(player.level(), clickedPos, actualBlockState, player, inHand);
+                                }
+                            }
+                        }
+                    }
                 }
-
-                ItemStack inHand = player.getItemInHand(hand);
-
-                BlockItem.updateCustomBlockEntityTag(player.level(), player, clickedPos, inHand);
-
-                BlockEntity blockEntity = player.level().getBlockEntity(clickedPos);
-                if (blockEntity != null) {
-                    blockEntity.applyComponentsFromItemStack(inHand);
-                }
-
-                if (!(actualBlock instanceof BedBlock) && !(actualBlock instanceof DoublePlantBlock) && !(actualBlock instanceof DoorBlock)) {
-                    actualBlock.setPlacedBy(player.level(), clickedPos, actualBlockState, player, inHand);
-                }
-            }
-        }
+            });
+        });
     }
 
     private static boolean fireBukkitEvents(Player bukkitPlayer, BlockHitResult blockHit, boolean breaking, Map<BlockPos, BlockState> blocks, ServerPlayer player, CraftWorld world, InteractionHand hand) {
