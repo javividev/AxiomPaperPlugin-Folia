@@ -1,5 +1,6 @@
 package com.moulberry.axiom.world_properties.server;
 
+import com.moulberry.axiom.AxiomPaper;
 import com.moulberry.axiom.VersionHelper;
 import com.moulberry.axiom.world_properties.WorldPropertyCategory;
 import com.moulberry.axiom.world_properties.WorldPropertyWidgetType;
@@ -8,7 +9,7 @@ import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
-import org.bukkit.GameRule;
+import org.bukkit.Bukkit;
 import org.bukkit.GameRules;
 import org.bukkit.NamespacedKey;
 import org.bukkit.World;
@@ -84,7 +85,9 @@ public class ServerWorldPropertiesRegistry {
         "axiom.editorui.window.world_properties.pause_weather",
         true, WorldPropertyWidgetType.CHECKBOX, world -> !world.getGameRuleValue(GameRules.ADVANCE_WEATHER),
         (player, world, bool) -> {
-            world.setGameRule(GameRules.ADVANCE_WEATHER, !bool);
+            World w = world;
+            boolean advanceWeather = !bool;
+            Bukkit.getGlobalRegionScheduler().execute(AxiomPaper.PLUGIN, () -> w.setGameRule(GameRules.ADVANCE_WEATHER, advanceWeather));
             return PropertyUpdateResult.UPDATE_WITHOUT_SYNC;
         }
     );

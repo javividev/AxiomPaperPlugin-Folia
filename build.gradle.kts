@@ -62,6 +62,14 @@ dependencies {
 }
 
 tasks {
+    // El JAR sin sombrear no incluye cloud-paper ni otras libs; el despliegue debe ser el shadow (clf. vacío).
+    jar {
+        archiveClassifier.set("unshaded")
+    }
+    shadowJar {
+        archiveClassifier.set("")
+        mergeServiceFiles()
+    }
     assemble {
         dependsOn(shadowJar)
     }

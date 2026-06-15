@@ -29,6 +29,9 @@ unsupported-axiom-version: "warn"
 # Maximum packet size. Must not be less than 30000
 max-block-buffer-packet-size: 0x100000
 
+# When true, ignores whitelist-world-regex and blacklist-world-regex (dev convenience; not the server player whitelist)
+development-mode: true
+
 # Regex for whitelisting worlds
 # The world can only be modified if the regex matches the world's name
 whitelist-world-regex: ""

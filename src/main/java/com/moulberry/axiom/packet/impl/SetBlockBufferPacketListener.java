@@ -22,6 +22,7 @@ import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.PalettedContainer;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
+import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.craftbukkit.entity.CraftPlayer;
 import org.bukkit.entity.Player;
@@ -101,8 +102,10 @@ public class SetBlockBufferPacketListener implements PacketHandler {
                 player.getBukkitEntity().kick(net.kyori.adventure.text.Component.text("An error occurred while processing block change: " + errorMsg));
             }
         };
-        org.bukkit.Bukkit.getGlobalRegionScheduler().execute(this.plugin, task);
+        org.bukkit.Bukkit.getRegionScheduler().run(this.plugin, player.getBukkitEntity().getLocation(), t -> task.run());
     }
+
+    private record BiomeEntry(int x, int y, int z, ResourceKey<Biome> biome) {}
 
     private void applyBiomeBuffer(ServerPlayer player, MinecraftServer server, BiomeBuffer biomeBuffer, ResourceKey<Level> worldKey, int clientAvailableDispatchSends) {
         Runnable task = () -> {
@@ -124,8 +127,6 @@ public class SetBlockBufferPacketListener implements PacketHandler {
                     return;
                 }
 
-                Set<LevelChunk> changedChunks = new HashSet<>();
-
                 int minSection = world.getMinSectionY();
                 int maxSection = world.getMaxSectionY();
 
@@ -134,38 +135,65 @@ public class SetBlockBufferPacketListener implements PacketHandler {
 
                 Registry<Biome> registry = registryOptional.get();
 
+                Map<Long, List<BiomeEntry>> biomesByChunk = new HashMap<>();
                 biomeBuffer.forEachEntry((x, y, z, biome) -> {
-                    int cy = y >> 2;
-                    if (cy < minSection || cy > maxSection) {
-                        return;
-                    }
-
-                    var holder = registry.get(biome);
-                    if (holder.isPresent()) {
-                        LevelChunk chunk = (LevelChunk) world.getChunk(x >> 2, z >> 2, ChunkStatus.FULL, false);
-                        if (chunk == null) return;
-
-                        var section = chunk.getSection(cy - minSection);
-                        PalettedContainer<Holder<Biome>> container = (PalettedContainer<Holder<Biome>>) section.getBiomes();
-
-                        if (!Integration.canPlaceBlock(player.getBukkitEntity(),
-                            new Location(player.getBukkitEntity().getWorld(), (x<<2)+1, (y<<2)+1, (z<<2)+1))) return;
-
-                        container.set(x & 3, y & 3, z & 3, holder.get());
-                        changedChunks.add(chunk);
-                    }
+                    long chunkKey = ChunkPos.asLong(x >> 2, z >> 2);
+                    biomesByChunk.computeIfAbsent(chunkKey, k -> new ArrayList<>()).add(new BiomeEntry(x, y, z, biome));
                 });
 
-                var chunkMap = world.getChunkSource().chunkMap;
-                HashMap<ServerPlayer, List<LevelChunk>> map = new HashMap<>();
-                for (LevelChunk chunk : changedChunks) {
-                    chunk.markUnsaved();
-                    ChunkPos chunkPos = chunk.getPos();
-                    for (ServerPlayer serverPlayer2 : chunkMap.getPlayers(chunkPos, false)) {
-                        map.computeIfAbsent(serverPlayer2, serverPlayer -> new ArrayList<>()).add(chunk);
-                    }
-                }
-                map.forEach((serverPlayer, list) -> serverPlayer.connection.send(ClientboundChunksBiomesPacket.forChunks(list)));
+                biomesByChunk.forEach((chunkKey, chunkBiomes) -> {
+                    int cx = ChunkPos.getX(chunkKey);
+                    int cz = ChunkPos.getZ(chunkKey);
+
+                    Bukkit.getRegionScheduler().run(this.plugin, player.getBukkitEntity().getWorld(), cx, cz, t -> {
+                        try {
+                            Set<LevelChunk> changedChunks = new HashSet<>();
+
+                            for (BiomeEntry entry : chunkBiomes) {
+                                int cy = entry.y >> 2;
+                                if (cy < minSection || cy > maxSection) {
+                                    continue;
+                                }
+
+                                var holder = registry.get(entry.biome);
+                                if (holder.isPresent()) {
+                                    LevelChunk chunk = (LevelChunk) world.getChunk(cx, cz, ChunkStatus.FULL, false);
+                                    if (chunk == null) continue;
+
+                                    var section = chunk.getSection(cy - minSection);
+                                    PalettedContainer<Holder<Biome>> container = (PalettedContainer<Holder<Biome>>) section.getBiomes();
+
+                                    if (!Integration.canPlaceBlock(player.getBukkitEntity(),
+                                        new Location(player.getBukkitEntity().getWorld(), (entry.x<<2)+1, (entry.y<<2)+1, (entry.z<<2)+1))) continue;
+
+                                    container.set(entry.x & 3, entry.y & 3, entry.z & 3, holder.get());
+                                    changedChunks.add(chunk);
+                                }
+                            }
+
+                            if (!changedChunks.isEmpty()) {
+                                var chunkMap = world.getChunkSource().chunkMap;
+                                HashMap<ServerPlayer, List<LevelChunk>> clientUpdateMap = new HashMap<>();
+                                for (LevelChunk chunk : changedChunks) {
+                                    chunk.markUnsaved();
+                                    ChunkPos chunkPos = chunk.getPos();
+                                    for (ServerPlayer serverPlayer2 : chunkMap.getPlayers(chunkPos, false)) {
+                                        clientUpdateMap.computeIfAbsent(serverPlayer2, serverPlayer -> new ArrayList<>()).add(chunk);
+                                    }
+                                }
+                                clientUpdateMap.forEach((serverPlayer, list) -> serverPlayer.connection.send(ClientboundChunksBiomesPacket.forChunks(list)));
+                            }
+                        } catch (Throwable err) {
+                            String errorMsg = err.getMessage();
+                            if (errorMsg == null || errorMsg.isEmpty()) {
+                                errorMsg = err.getClass().getSimpleName();
+                            }
+                            plugin.getLogger().severe("Error processing biome_buffer on region thread: " + errorMsg);
+                            err.printStackTrace();
+                            player.getBukkitEntity().kick(net.kyori.adventure.text.Component.text("An error occurred while processing biome change: " + errorMsg));
+                        }
+                    });
+                });
             } catch (Throwable t) {
                 String errorMsg = t.getMessage();
                 if (errorMsg == null || errorMsg.isEmpty()) {
@@ -176,7 +204,7 @@ public class SetBlockBufferPacketListener implements PacketHandler {
                 player.getBukkitEntity().kick(net.kyori.adventure.text.Component.text("An error occurred while processing biome change: " + errorMsg));
             }
         };
-        org.bukkit.Bukkit.getGlobalRegionScheduler().execute(this.plugin, task);
+        org.bukkit.Bukkit.getRegionScheduler().run(this.plugin, player.getBukkitEntity().getLocation(), t -> task.run());
     }
 
 }

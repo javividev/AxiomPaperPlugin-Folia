@@ -57,13 +57,17 @@ public class DeleteEntityPacketListener implements PacketHandler {
                 continue;
             }
 
+            int cx = entity.getBlockX() >> 4;
+            int cz = entity.getBlockZ() >> 4;
 
-            AxiomRemoveEntityEvent removeEntityEvent = new AxiomRemoveEntityEvent(player, entity.getBukkitEntity());
-            Bukkit.getPluginManager().callEvent(removeEntityEvent);
+            Bukkit.getRegionScheduler().run(this.plugin, player.getWorld(), cx, cz, task -> {
+                AxiomRemoveEntityEvent removeEntityEvent = new AxiomRemoveEntityEvent(player, entity.getBukkitEntity());
+                Bukkit.getPluginManager().callEvent(removeEntityEvent);
 
-            if (!removeEntityEvent.isCancelled()) {
-                entity.remove(Entity.RemovalReason.DISCARDED);
-            }
+                if (!removeEntityEvent.isCancelled()) {
+                    entity.remove(Entity.RemovalReason.DISCARDED);
+                }
+            });
         }
     }
 

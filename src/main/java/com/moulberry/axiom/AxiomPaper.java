@@ -112,6 +112,7 @@ public class AxiomPaper extends JavaPlugin implements Listener {
 
     private boolean clearCachedPermissionsOnTick = true;
     private int checkAxiomEnableDisableTimer = 0;
+    private boolean developmentMode = false;
 
     @Override
     public void onEnable() {
@@ -133,6 +134,7 @@ public class AxiomPaper extends JavaPlugin implements Listener {
         checkOutdatedConfig();
 
         this.logLargeBlockBufferChanges = this.configuration.getBoolean("log-large-block-buffer-changes");
+        this.developmentMode = this.configuration.getBoolean("development-mode");
 
         if (this.configuration.getBoolean("allow-large-payload-for-all-packets")) {
             this.packetCollectionReadLimit = Short.MAX_VALUE;
@@ -747,14 +749,16 @@ public class AxiomPaper extends JavaPlugin implements Listener {
     }
 
     public boolean canModifyWorld(Player player, World world) {
-        String whitelist = this.configuration.getString("whitelist-world-regex");
-        if (whitelist != null && !whitelist.isBlank() && !world.getName().matches(whitelist)) {
-            return false;
-        }
+        if (!this.developmentMode) {
+            String whitelist = this.configuration.getString("whitelist-world-regex");
+            if (whitelist != null && !whitelist.isBlank() && !world.getName().matches(whitelist)) {
+                return false;
+            }
 
-        String blacklist = this.configuration.getString("blacklist-world-regex");
-        if (blacklist != null && !blacklist.isBlank() && world.getName().matches(blacklist)) {
-            return false;
+            String blacklist = this.configuration.getString("blacklist-world-regex");
+            if (blacklist != null && !blacklist.isBlank() && world.getName().matches(blacklist)) {
+                return false;
+            }
         }
 
         AxiomModifyWorldEvent modifyWorldEvent = new AxiomModifyWorldEvent(player, world);

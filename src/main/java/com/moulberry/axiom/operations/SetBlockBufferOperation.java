@@ -16,14 +16,11 @@ import it.unimi.dsi.fastutil.longs.LongIterator;
 import it.unimi.dsi.fastutil.shorts.Short2ObjectMap;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Holder;
 import net.minecraft.core.SectionPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.ProblemReporter;
-import net.minecraft.world.entity.ai.village.poi.PoiType;
-import net.minecraft.world.entity.ai.village.poi.PoiTypes;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.EntityBlock;
@@ -37,16 +34,16 @@ import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.lighting.LightEngine;
 import net.minecraft.world.level.storage.TagValueInput;
-import org.bukkit.Chunk;
+import org.bukkit.Bukkit;
 import org.bukkit.craftbukkit.CraftChunk;
 
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class SetBlockBufferOperation implements PendingOperation {
 
@@ -58,7 +55,8 @@ public class SetBlockBufferOperation implements PendingOperation {
     private Long2ObjectOpenHashMap<List<Long2ObjectMap.Entry<PalettedContainer<BlockState>>>> sectionsForChunks = null;
     private LongArrayList getChunkFutures = null;
     private List<CompletableFuture<LevelChunk>> chunkFutures = new ArrayList<>();
-    private boolean sendGameMasterBlockWarning = false;
+    private final AtomicBoolean sendGameMasterBlockWarning = new AtomicBoolean(false);
+    private final AtomicInteger pendingRegionChunkTasks = new AtomicInteger(0);
     private boolean finished = false;
 
     public SetBlockBufferOperation(ServerPlayer player, BlockBuffer buffer, boolean allowNbt) {
@@ -122,7 +120,16 @@ public class SetBlockBufferOperation implements PendingOperation {
                         this.chunkFutures.add(CompletableFuture.completedFuture(chunk));
                     }
                 } else {
-                    this.chunkFutures.add(level.getWorld().getChunkAtAsync(x, z).thenApply(chunk -> (LevelChunk) ((CraftChunk)chunk).getHandle(ChunkStatus.FULL)));
+                    CompletableFuture<LevelChunk> future = new CompletableFuture<>();
+                    Bukkit.getRegionScheduler().run(AxiomPaper.PLUGIN, level.getWorld(), x, z, t -> {
+                        level.getWorld().getChunkAtAsync(x, z).thenAccept(chunk -> {
+                            future.complete((LevelChunk) ((CraftChunk)chunk).getHandle(ChunkStatus.FULL));
+                        }).exceptionally(err -> {
+                            future.completeExceptionally(err);
+                            return null;
+                        });
+                    });
+                    this.chunkFutures.add(future);
                 }
             }
         }
@@ -137,211 +144,213 @@ public class SetBlockBufferOperation implements PendingOperation {
             chunkFutureIterator.remove();
 
             LevelChunk chunk = future.join();
-
-            Heightmap worldSurface = null;
-            Heightmap oceanFloor = null;
-            Heightmap motionBlocking = null;
-            Heightmap motionBlockingNoLeaves = null;
-            for (Map.Entry<Heightmap.Types, Heightmap> heightmap : chunk.getHeightmaps()) {
-                switch (heightmap.getKey()) {
-                    case WORLD_SURFACE -> worldSurface = heightmap.getValue();
-                    case OCEAN_FLOOR -> oceanFloor = heightmap.getValue();
-                    case MOTION_BLOCKING -> motionBlocking = heightmap.getValue();
-                    case MOTION_BLOCKING_NO_LEAVES -> motionBlockingNoLeaves = heightmap.getValue();
-                    default -> {}
+            this.pendingRegionChunkTasks.incrementAndGet();
+            int cx = chunk.locX;
+            int cz = chunk.locZ;
+            Bukkit.getRegionScheduler().run(AxiomPaper.PLUGIN, level.getWorld(), cx, cz, t -> {
+                try {
+                    this.applyBlockBufferToChunk(level, extension, blockPos, chunk, emptyState);
+                } catch (Throwable err) {
+                    AxiomPaper.PLUGIN.getLogger().severe("SetBlockBuffer failed on region thread: " + (err.getMessage() != null ? err.getMessage() : err.getClass().getSimpleName()));
+                    err.printStackTrace();
+                    Bukkit.getGlobalRegionScheduler().execute(AxiomPaper.PLUGIN, () ->
+                        this.player.getBukkitEntity().kick(net.kyori.adventure.text.Component.text("An error occurred while processing block change: " + (err.getMessage() != null ? err.getMessage() : err.getClass().getSimpleName()))));
+                } finally {
+                    this.pendingRegionChunkTasks.decrementAndGet();
                 }
-            }
-
-            boolean chunkChanged = false;
-            boolean chunkLightChanged = false;
-
-            long chunkPosLong = ChunkPos.pack(chunk.locX, chunk.locZ);
-            List<Long2ObjectMap.Entry<PalettedContainer<BlockState>>> sections = this.sectionsForChunks.get(chunkPosLong);
-            for (Long2ObjectMap.Entry<PalettedContainer<BlockState>> entry : sections) {
-                int cx = BlockPos.getX(entry.getLongKey());
-                int cy = BlockPos.getY(entry.getLongKey());
-                int cz = BlockPos.getZ(entry.getLongKey());
-                PalettedContainer<BlockState> container = entry.getValue();
-
-                if (cy < level.getMinSectionY() || cy > level.getMaxSectionY()) {
-                    continue;
-                }
-
-                SectionPermissionChecker checker = Integration.checkSection(player.getBukkitEntity(), level.getWorld(), cx, cy, cz);
-                if (checker != null && checker.noneAllowed()) {
-                    continue;
-                }
-
-                LevelChunkSection section = chunk.getSection(level.getSectionIndexFromSectionY(cy));
-                boolean hasOnlyAir = section.hasOnlyAir();
-
-                boolean containerMaybeHasPoi = container.maybeHas(PoiTypes::hasPoi);
-                boolean sectionMaybeHasPoi = section.maybeHas(PoiTypes::hasPoi);
-
-                Short2ObjectMap<CompressedBlockEntity> blockEntityChunkMap = this.allowNbt ? this.buffer.getBlockEntityChunkMap(entry.getLongKey()) : null;
-
-                int minX = 0;
-                int minY = 0;
-                int minZ = 0;
-                int maxX = 15;
-                int maxY = 15;
-                int maxZ = 15;
-
-                if (checker != null) {
-                    minX = checker.bounds().minX();
-                    minY = checker.bounds().minY();
-                    minZ = checker.bounds().minZ();
-                    maxX = checker.bounds().maxX();
-                    maxY = checker.bounds().maxY();
-                    maxZ = checker.bounds().maxZ();
-                    if (checker.allAllowed()) {
-                        checker = null;
-                    }
-                }
-
-                for (int x = minX; x <= maxX; x++) {
-                    for (int y = minY; y <= maxY; y++) {
-                        for (int z = minZ; z <= maxZ; z++) {
-                            BlockState blockState = container.get(x, y, z);
-                            if (blockState == emptyState) continue;
-
-                            int bx = cx*16 + x;
-                            int by = cy*16 + y;
-                            int bz = cz*16 + z;
-
-                            if (hasOnlyAir && blockState.isAir()) {
-                                continue;
-                            }
-
-                            if (checker != null && !checker.allowed(x, y, z)) continue;
-
-                            Block block = blockState.getBlock();
-
-                            BlockState old = section.setBlockState(x, y, z, blockState, true);
-                            if (blockState != old) {
-                                chunkChanged = true;
-                                blockPos.set(bx, by, bz);
-
-                                motionBlocking.update(x, by, z, blockState);
-                                motionBlockingNoLeaves.update(x, by, z, blockState);
-                                oceanFloor.update(x, by, z, blockState);
-                                worldSurface.update(x, by, z, blockState);
-
-                                // Update Light
-                                chunkLightChanged |= LightEngine.hasDifferentLightProperties(old, blockState);
-
-                                // Update Poi
-                                // Skip POI updates on Folia - they must be done on region thread and will be updated naturally
-                                Optional<Holder<PoiType>> newPoi = containerMaybeHasPoi ? PoiTypes.forState(blockState) : Optional.empty();
-                                Optional<Holder<PoiType>> oldPoi = sectionMaybeHasPoi ? PoiTypes.forState(old) : Optional.empty();
-                            }
-
-                            if (blockState.hasBlockEntity()) {
-                                blockPos.set(bx, by, bz);
-
-                                BlockEntity blockEntity = chunk.getBlockEntity(blockPos, LevelChunk.EntityCreationType.CHECK);
-
-                                if (blockEntity == null) {
-                                    // There isn't a block entity here, create it!
-                                    blockEntity = ((EntityBlock)block).newBlockEntity(blockPos, blockState);
-                                    if (blockEntity != null) {
-                                        chunk.addAndRegisterBlockEntity(blockEntity);
-                                    }
-                                } else if (blockEntity.getType().isValid(blockState)) {
-                                    // Block entity is here and the type is correct
-                                    blockEntity.setBlockState(blockState);
-                                    AxiomReflection.updateBlockEntityTicker(chunk, blockEntity);
-                                } else {
-                                    // Block entity type isn't correct, we need to recreate it
-                                    try {
-                                        chunk.removeBlockEntity(blockPos);
-                                    } catch (Throwable t) {
-                                        if (!t.getClass().getName().contains("WrongThreadException") && !t.getClass().getName().contains("TickThread")) {
-                                            throw t;
-                                        }
-                                        // Force remove by setting to null in the internal map
-                                        try {
-                                            chunk.blockEntities.remove(blockPos);
-                                        } catch (Throwable ignored) {}
-                                    }
-
-                                    blockEntity = ((EntityBlock)block).newBlockEntity(blockPos, blockState);
-                                    if (blockEntity != null) {
-                                        try {
-                                            chunk.addAndRegisterBlockEntity(blockEntity);
-                                        } catch (Throwable t2) {
-                                            if (!t2.getClass().getName().contains("WrongThreadException") && !t2.getClass().getName().contains("TickThread")) {
-                                                throw t2;
-                                            }
-                                            // Force add to internal map
-                                            try {
-                                                chunk.blockEntities.put(blockPos, blockEntity);
-                                            } catch (Throwable ignored) {}
-                                        }
-                                    }
-                                }
-                                if (blockEntity != null && blockEntityChunkMap != null) {
-                                    if (blockEntity instanceof GameMasterBlock && !player.canUseGameMasterBlocks()) {
-                                        sendGameMasterBlockWarning = true;
-                                    } else {
-                                        int key = x | (y << 4) | (z << 8);
-                                        CompressedBlockEntity savedBlockEntity = blockEntityChunkMap.get((short) key);
-                                        if (savedBlockEntity != null) {
-                                            var input = TagValueInput.create(ProblemReporter.DISCARDING, player.registryAccess(), savedBlockEntity.decompress());
-                                            blockEntity.loadWithComponents(input);
-                                            chunkChanged = true;
-                                        }
-                                    }
-                                }
-                            } else if (old.hasBlockEntity()) {
-                                try {
-                                    chunk.removeBlockEntity(blockPos);
-                                } catch (Throwable t) {
-                                    if (!t.getClass().getName().contains("WrongThreadException") && !t.getClass().getName().contains("TickThread")) {
-                                        throw t;
-                                    }
-                                    // Force remove by setting to null in the internal map
-                                    try {
-                                        chunk.blockEntities.remove(blockPos);
-                                    } catch (Throwable ignored) {}
-                                }
-                            }
-
-                            if (CoreProtectIntegration.isEnabled() && old != blockState) {
-                                String changedBy = player.getBukkitEntity().getName();
-                                BlockPos changedPos = new BlockPos(bx, by, bz);
-
-                                CoreProtectIntegration.logRemoval(changedBy, old, level.getWorld(), changedPos);
-                                CoreProtectIntegration.logPlacement(changedBy, blockState, level.getWorld(), changedPos);
-                            }
-                        }
-                    }
-                }
-
-                boolean nowHasOnlyAir = section.hasOnlyAir();
-                if (hasOnlyAir != nowHasOnlyAir) {
-                    level.getChunkSource().getLightEngine().updateSectionStatus(SectionPos.of(cx, cy, cz), nowHasOnlyAir);
-                    level.getChunkSource().onSectionEmptinessChanged(cx, cy, cz, nowHasOnlyAir);
-                }
-            }
-
-            if (chunkChanged) {
-                extension.sendChunk(chunk.locX, chunk.locZ);
-                chunk.markUnsaved();
-            }
-            if (chunkLightChanged) {
-                extension.lightChunk(chunk.locX, chunk.locZ);
-            }
+            });
         }
 
-        if (!this.getChunkFutures.isEmpty()) {
+        if (!this.getChunkFutures.isEmpty() || this.pendingRegionChunkTasks.get() > 0) {
             return;
         }
 
-        if (this.sendGameMasterBlockWarning) {
+        if (this.sendGameMasterBlockWarning.get()) {
             this.player.sendSystemMessage(Component.literal("Unable to set data for Game Master block since you don't have op").withStyle(ChatFormatting.RED));
         }
 
         this.finished = true;
+    }
+
+    private void applyBlockBufferToChunk(ServerLevel level, WorldExtension extension, BlockPos.MutableBlockPos blockPos, LevelChunk chunk, BlockState emptyState) {
+        Heightmap worldSurface = null;
+        Heightmap oceanFloor = null;
+        Heightmap motionBlocking = null;
+        Heightmap motionBlockingNoLeaves = null;
+        for (Map.Entry<Heightmap.Types, Heightmap> heightmap : chunk.getHeightmaps()) {
+            switch (heightmap.getKey()) {
+                case WORLD_SURFACE -> worldSurface = heightmap.getValue();
+                case OCEAN_FLOOR -> oceanFloor = heightmap.getValue();
+                case MOTION_BLOCKING -> motionBlocking = heightmap.getValue();
+                case MOTION_BLOCKING_NO_LEAVES -> motionBlockingNoLeaves = heightmap.getValue();
+                default -> {}
+            }
+        }
+
+        boolean chunkChanged = false;
+        boolean chunkLightChanged = false;
+
+        long chunkPosLong = ChunkPos.asLong(chunk.locX, chunk.locZ);
+        List<Long2ObjectMap.Entry<PalettedContainer<BlockState>>> sections = this.sectionsForChunks.get(chunkPosLong);
+        for (Long2ObjectMap.Entry<PalettedContainer<BlockState>> entry : sections) {
+            int cx = BlockPos.getX(entry.getLongKey());
+            int cy = BlockPos.getY(entry.getLongKey());
+            int cz = BlockPos.getZ(entry.getLongKey());
+            PalettedContainer<BlockState> container = entry.getValue();
+
+            if (cy < level.getMinSectionY() || cy > level.getMaxSectionY()) {
+                continue;
+            }
+
+            SectionPermissionChecker checker = Integration.checkSection(player.getBukkitEntity(), level.getWorld(), cx, cy, cz);
+            if (checker != null && checker.noneAllowed()) {
+                continue;
+            }
+
+            LevelChunkSection section = chunk.getSection(level.getSectionIndexFromSectionY(cy));
+            boolean hasOnlyAir = section.hasOnlyAir();
+
+            Short2ObjectMap<CompressedBlockEntity> blockEntityChunkMap = this.allowNbt ? this.buffer.getBlockEntityChunkMap(entry.getLongKey()) : null;
+
+            int minX = 0;
+            int minY = 0;
+            int minZ = 0;
+            int maxX = 15;
+            int maxY = 15;
+            int maxZ = 15;
+
+            if (checker != null) {
+                minX = checker.bounds().minX();
+                minY = checker.bounds().minY();
+                minZ = checker.bounds().minZ();
+                maxX = checker.bounds().maxX();
+                maxY = checker.bounds().maxY();
+                maxZ = checker.bounds().maxZ();
+                if (checker.allAllowed()) {
+                    checker = null;
+                }
+            }
+
+            for (int x = minX; x <= maxX; x++) {
+                for (int y = minY; y <= maxY; y++) {
+                    for (int z = minZ; z <= maxZ; z++) {
+                        BlockState blockState = container.get(x, y, z);
+                        if (blockState == emptyState) continue;
+
+                        int bx = cx*16 + x;
+                        int by = cy*16 + y;
+                        int bz = cz*16 + z;
+
+                        if (hasOnlyAir && blockState.isAir()) {
+                            continue;
+                        }
+
+                        if (checker != null && !checker.allowed(x, y, z)) continue;
+
+                        Block block = blockState.getBlock();
+
+                        BlockState old = section.setBlockState(x, y, z, blockState, true);
+                        if (blockState != old) {
+                            chunkChanged = true;
+                            blockPos.set(bx, by, bz);
+
+                            motionBlocking.update(x, by, z, blockState);
+                            motionBlockingNoLeaves.update(x, by, z, blockState);
+                            oceanFloor.update(x, by, z, blockState);
+                            worldSurface.update(x, by, z, blockState);
+
+                            chunkLightChanged |= LightEngine.hasDifferentLightProperties(old, blockState);
+                        }
+
+                        if (blockState.hasBlockEntity()) {
+                            blockPos.set(bx, by, bz);
+
+                            BlockEntity blockEntity = chunk.getBlockEntity(blockPos, LevelChunk.EntityCreationType.CHECK);
+
+                            if (blockEntity == null) {
+                                blockEntity = ((EntityBlock)block).newBlockEntity(blockPos, blockState);
+                                if (blockEntity != null) {
+                                    chunk.addAndRegisterBlockEntity(blockEntity);
+                                }
+                            } else if (blockEntity.getType().isValid(blockState)) {
+                                blockEntity.setBlockState(blockState);
+                                AxiomReflection.updateBlockEntityTicker(chunk, blockEntity);
+                            } else {
+                                try {
+                                    chunk.removeBlockEntity(blockPos);
+                                } catch (Throwable err) {
+                                    if (!err.getClass().getName().contains("WrongThreadException") && !err.getClass().getName().contains("TickThread")) {
+                                        throw err;
+                                    }
+                                    try {
+                                        chunk.blockEntities.remove(blockPos);
+                                    } catch (Throwable ignored) {}
+                                }
+
+                                blockEntity = ((EntityBlock)block).newBlockEntity(blockPos, blockState);
+                                if (blockEntity != null) {
+                                    try {
+                                        chunk.addAndRegisterBlockEntity(blockEntity);
+                                    } catch (Throwable t2) {
+                                        if (!t2.getClass().getName().contains("WrongThreadException") && !t2.getClass().getName().contains("TickThread")) {
+                                            throw t2;
+                                        }
+                                        try {
+                                            chunk.blockEntities.put(blockPos, blockEntity);
+                                        } catch (Throwable ignored) {}
+                                    }
+                                }
+                            }
+                            if (blockEntity != null && blockEntityChunkMap != null) {
+                                if (blockEntity instanceof GameMasterBlock && !player.canUseGameMasterBlocks()) {
+                                    this.sendGameMasterBlockWarning.set(true);
+                                } else {
+                                    int key = x | (y << 4) | (z << 8);
+                                    CompressedBlockEntity savedBlockEntity = blockEntityChunkMap.get((short) key);
+                                    if (savedBlockEntity != null) {
+                                        var input = TagValueInput.create(ProblemReporter.DISCARDING, player.registryAccess(), savedBlockEntity.decompress());
+                                        blockEntity.loadWithComponents(input);
+                                        chunkChanged = true;
+                                    }
+                                }
+                            }
+                        } else if (old.hasBlockEntity()) {
+                            try {
+                                chunk.removeBlockEntity(blockPos);
+                            } catch (Throwable err) {
+                                if (!err.getClass().getName().contains("WrongThreadException") && !err.getClass().getName().contains("TickThread")) {
+                                    throw err;
+                                }
+                                try {
+                                    chunk.blockEntities.remove(blockPos);
+                                } catch (Throwable ignored) {}
+                            }
+                        }
+
+                        if (CoreProtectIntegration.isEnabled() && old != blockState) {
+                            String changedBy = player.getBukkitEntity().getName();
+                            BlockPos changedPos = new BlockPos(bx, by, bz);
+
+                            CoreProtectIntegration.logRemoval(changedBy, old, level.getWorld(), changedPos);
+                            CoreProtectIntegration.logPlacement(changedBy, blockState, level.getWorld(), changedPos);
+                        }
+                    }
+                }
+            }
+
+            boolean nowHasOnlyAir = section.hasOnlyAir();
+            if (hasOnlyAir != nowHasOnlyAir) {
+                level.getChunkSource().getLightEngine().updateSectionStatus(SectionPos.of(cx, cy, cz), nowHasOnlyAir);
+                level.getChunkSource().onSectionEmptinessChanged(cx, cy, cz, nowHasOnlyAir);
+            }
+        }
+
+        if (chunkChanged) {
+            extension.sendChunk(chunk.locX, chunk.locZ);
+            chunk.markUnsaved();
+        }
+        if (chunkLightChanged) {
+            extension.lightChunk(chunk.locX, chunk.locZ);
+        }
     }
 }
