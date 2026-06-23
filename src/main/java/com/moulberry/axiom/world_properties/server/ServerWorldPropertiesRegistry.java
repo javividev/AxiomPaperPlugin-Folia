@@ -9,6 +9,7 @@ import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.saveddata.WeatherData;
 import org.bukkit.Bukkit;
 import org.bukkit.GameRules;
 import org.bukkit.NamespacedKey;
@@ -99,12 +100,27 @@ public class ServerWorldPropertiesRegistry {
             List.of("axiom.editorui.window.world_properties.rain_weather", "axiom.editorui.window.world_properties.thunder_weather")
     ), world -> 0, (player, world, index) -> {
         ServerLevel serverLevel = ((CraftWorld)world).getHandle();
+        WeatherData weatherData = serverLevel.getWeatherData();
         if (index == 0) {
-            serverLevel.setWeatherParameters(ServerLevel.RAIN_DELAY.sample(serverLevel.random), 0, false, false);
+            weatherData.setClearWeatherTime(ServerLevel.RAIN_DELAY.sample(serverLevel.getRandom()));
+            weatherData.setRainTime(0);
+            weatherData.setThunderTime(0);
+            weatherData.setRaining(false);
+            weatherData.setThundering(false);
         } else if (index == 1) {
-            serverLevel.setWeatherParameters(0, ServerLevel.RAIN_DURATION.sample(serverLevel.random), true, false);
+            int rainDuration = ServerLevel.RAIN_DURATION.sample(serverLevel.getRandom());
+            weatherData.setClearWeatherTime(0);
+            weatherData.setRainTime(rainDuration);
+            weatherData.setThunderTime(rainDuration);
+            weatherData.setRaining(true);
+            weatherData.setThundering(false);
         } else if (index == 2) {
-            serverLevel.setWeatherParameters(0, ServerLevel.THUNDER_DURATION.sample(serverLevel.random), true, true);
+            int thunderDuration = ServerLevel.THUNDER_DURATION.sample(serverLevel.getRandom());
+            weatherData.setClearWeatherTime(0);
+            weatherData.setRainTime(thunderDuration);
+            weatherData.setThunderTime(thunderDuration);
+            weatherData.setRaining(true);
+            weatherData.setThundering(true);
         }
         return PropertyUpdateResult.UPDATE_WITHOUT_SYNC;
     });

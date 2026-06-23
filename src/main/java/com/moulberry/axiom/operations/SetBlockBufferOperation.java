@@ -90,7 +90,7 @@ public class SetBlockBufferOperation implements PendingOperation {
                 int posX = BlockPos.getX(pos);
                 int posZ = BlockPos.getZ(pos);
 
-                long chunkPos = ChunkPos.asLong(posX, posZ);
+                long chunkPos = ChunkPos.pack(posX, posZ);
                 this.sectionsForChunks.computeIfAbsent(chunkPos, k -> new ArrayList<>()).add(entry);
             }
 
@@ -190,7 +190,7 @@ public class SetBlockBufferOperation implements PendingOperation {
         boolean chunkChanged = false;
         boolean chunkLightChanged = false;
 
-        long chunkPosLong = ChunkPos.asLong(chunk.locX, chunk.locZ);
+        long chunkPosLong = ChunkPos.pack(chunk.locX, chunk.locZ);
         List<Long2ObjectMap.Entry<PalettedContainer<BlockState>>> sections = this.sectionsForChunks.get(chunkPosLong);
         for (Long2ObjectMap.Entry<PalettedContainer<BlockState>> entry : sections) {
             int cx = BlockPos.getX(entry.getLongKey());
@@ -283,7 +283,7 @@ public class SetBlockBufferOperation implements PendingOperation {
                                         throw err;
                                     }
                                     try {
-                                        chunk.blockEntities.remove(blockPos);
+                                        AxiomReflection.getBlockEntities(chunk).remove(blockPos);
                                     } catch (Throwable ignored) {}
                                 }
 
@@ -296,7 +296,7 @@ public class SetBlockBufferOperation implements PendingOperation {
                                             throw t2;
                                         }
                                         try {
-                                            chunk.blockEntities.put(blockPos, blockEntity);
+                                            AxiomReflection.getBlockEntities(chunk).put(blockPos, blockEntity);
                                         } catch (Throwable ignored) {}
                                     }
                                 }
@@ -322,7 +322,7 @@ public class SetBlockBufferOperation implements PendingOperation {
                                     throw err;
                                 }
                                 try {
-                                    chunk.blockEntities.remove(blockPos);
+                                    AxiomReflection.getBlockEntities(chunk).remove(blockPos);
                                 } catch (Throwable ignored) {}
                             }
                         }

@@ -5,11 +5,14 @@ import com.moulberry.axiom.event.AxiomTimeChangeEvent;
 import com.moulberry.axiom.integration.plotsquared.PlotSquaredIntegration;
 import com.moulberry.axiom.packet.PacketHandler;
 import com.moulberry.axiom.restrictions.AxiomPermission;
+import net.minecraft.core.Holder;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.clock.WorldClock;
+import net.minecraft.world.clock.WorldClocks;
 import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.level.Level;
 import org.bukkit.Bukkit;
@@ -54,7 +57,8 @@ public class SetTimePacketListener implements PacketHandler {
         if (timeChangeEvent.isCancelled()) return;
 
         if (time != null) {
-            level.setDayTime(time);
+            Holder<WorldClock> overworldClock = level.registryAccess().getOrThrow(WorldClocks.OVERWORLD);
+            level.clockManager().setTotalTicks(overworldClock, time);
         }
         if (freezeTime != null) {
             Player p = player;

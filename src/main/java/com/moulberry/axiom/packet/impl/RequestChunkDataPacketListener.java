@@ -2,6 +2,7 @@ package com.moulberry.axiom.packet.impl;
 
 import com.moulberry.axiom.AxiomConstants;
 import com.moulberry.axiom.AxiomPaper;
+import com.moulberry.axiom.AxiomReflection;
 import com.moulberry.axiom.VersionHelper;
 import com.moulberry.axiom.buffer.CompressedBlockEntity;
 import com.moulberry.axiom.integration.plotsquared.PlotSquaredIntegration;
@@ -149,12 +150,12 @@ public class RequestChunkDataPacketListener implements PacketHandler {
                         sendingBlockEntities.put(pos, CompressedBlockEntity.compress(tag, baos));
                     }
                 } else {
-                    long chunkPosLong = ChunkPos.asLong(chunkX, chunkZ);
+                    long chunkPosLong = ChunkPos.pack(chunkX, chunkZ);
                     LongList blockEntitiesInChunk = sendBlockEntityForPendingChunks.get(chunkPosLong);
                     if (blockEntitiesInChunk != null) {
                         blockEntitiesInChunk.add(pos);
                     } else {
-                        chunkFutures.add(ChunkPos.asLong(chunkX, chunkZ));
+                        chunkFutures.add(ChunkPos.pack(chunkX, chunkZ));
 
                         blockEntitiesInChunk = new LongArrayList();
                         blockEntitiesInChunk.add(pos);
@@ -193,7 +194,7 @@ public class RequestChunkDataPacketListener implements PacketHandler {
                         sendingSections.put(pos, container);
 
                         if (sendBlockEntitiesInChunks) {
-                            Set<Map.Entry<BlockPos, BlockEntity>> entrySet = chunk.blockEntities.entrySet();
+                            Set<Map.Entry<BlockPos, BlockEntity>> entrySet = AxiomReflection.getBlockEntities(chunk).entrySet();
                             Iterator<Map.Entry<BlockPos, BlockEntity>> iterator;
                             if (entrySet instanceof Object2ObjectMap.FastEntrySet fastEntrySet) {
                                 iterator = fastEntrySet.fastIterator();
@@ -216,12 +217,12 @@ public class RequestChunkDataPacketListener implements PacketHandler {
                         }
                     }
                 } else {
-                    long chunkPosLong = ChunkPos.asLong(sx, sz);
+                    long chunkPosLong = ChunkPos.pack(sx, sz);
                     IntList sendSections = sendSectionsForPendingChunks.get(chunkPosLong);
                     if (sendSections != null) {
                         sendSections.add(sy);
                     } else {
-                        chunkFutures.add(ChunkPos.asLong(sx, sz));
+                        chunkFutures.add(ChunkPos.pack(sx, sz));
 
                         sendSections = new IntArrayList();
                         sendSections.add(sy);

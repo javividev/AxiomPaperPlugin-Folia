@@ -162,7 +162,7 @@ public class SetBlockBufferPacketListener implements PacketHandler {
 
                 Map<Long, List<BiomeEntry>> biomesByChunk = new HashMap<>();
                 biomeBuffer.forEachEntry((x, y, z, biome) -> {
-                    long chunkKey = ChunkPos.asLong(x >> 2, z >> 2);
+                    long chunkKey = ChunkPos.pack(x >> 2, z >> 2);
                     biomesByChunk.computeIfAbsent(chunkKey, k -> new ArrayList<>()).add(new BiomeEntry(x, y, z, biome));
                 });
 

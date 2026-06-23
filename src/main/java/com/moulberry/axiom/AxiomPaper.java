@@ -76,6 +76,8 @@ public class AxiomPaper extends JavaPlugin implements Listener {
 
     public static AxiomPaper PLUGIN; // tsk tsk tsk
 
+    private static final Key BIG_PAYLOAD_CHANNEL_LISTENER_KEY = Key.key("axiom:handle_big_payload");
+
     public final Set<UUID> activeAxiomPlayers = Collections.newSetFromMap(new ConcurrentHashMap<>());
     public final Set<UUID> failedPermissionAxiomPlayers = Collections.newSetFromMap(new ConcurrentHashMap<>());
     public final Map<UUID, Restrictions> playerRestrictions = new ConcurrentHashMap<>();
@@ -225,7 +227,10 @@ public class AxiomPaper extends JavaPlugin implements Listener {
             protocol.codec().encode(friendlyByteBuf, new ServerboundCustomPayloadPacket(VersionHelper.createCustomPayload(VersionHelper.createIdentifier("dummy"), new byte[0])));
             int payloadId = friendlyByteBuf.readVarInt();
 
-            ChannelInitializeListenerHolder.addListener(Key.key("axiom:handle_big_payload"), new ChannelInitializeListener() {
+            // Remove any stale listener left behind by a previous plugin instance (e.g. after a /reload)
+            // whose classloader has since been closed, which would otherwise throw "zip file closed" for every connection.
+            ChannelInitializeListenerHolder.removeListener(BIG_PAYLOAD_CHANNEL_LISTENER_KEY);
+            ChannelInitializeListenerHolder.addListener(BIG_PAYLOAD_CHANNEL_LISTENER_KEY, new ChannelInitializeListener() {
                 @Override
                 public void afterInitChannel(@NonNull Channel channel) {
                     Connection connection = (Connection) channel.pipeline().get("packet_handler");
@@ -301,6 +306,11 @@ public class AxiomPaper extends JavaPlugin implements Listener {
         if (CoreProtectIntegration.isEnabled()) {
             this.getLogger().info("CoreProtect integration enabled");
         }
+    }
+
+    @Override
+    public void onDisable() {
+        ChannelInitializeListenerHolder.removeListener(BIG_PAYLOAD_CHANNEL_LISTENER_KEY);
     }
 
     private void checkOutdatedConfig() {
