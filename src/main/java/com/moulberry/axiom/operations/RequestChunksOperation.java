@@ -1,6 +1,7 @@
 package com.moulberry.axiom.operations;
 
 import com.moulberry.axiom.AxiomConstants;
+import com.moulberry.axiom.AxiomReflection;
 import com.moulberry.axiom.VersionHelper;
 import com.moulberry.axiom.buffer.CompressedBlockEntity;
 import com.moulberry.axiom.packet.impl.RequestChunkDataPacketListener;
@@ -212,7 +213,7 @@ public class RequestChunksOperation implements PendingOperation {
             }
 
             if (this.sendBlockEntitiesInChunks && hasNonAirSectionInChunk) {
-                Iterator<Map.Entry<BlockPos, BlockEntity>> iterator = chunk.blockEntities.entrySet().iterator();
+                Iterator<Map.Entry<BlockPos, BlockEntity>> iterator = AxiomReflection.getBlockEntities(chunk).entrySet().iterator();
 
                 while (iterator.hasNext()) {
                     Map.Entry<BlockPos, BlockEntity> entry = iterator.next();

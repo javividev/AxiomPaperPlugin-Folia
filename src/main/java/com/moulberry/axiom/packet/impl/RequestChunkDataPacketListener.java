@@ -2,6 +2,7 @@ package com.moulberry.axiom.packet.impl;
 
 import com.moulberry.axiom.AxiomConstants;
 import com.moulberry.axiom.AxiomPaper;
+import com.moulberry.axiom.AxiomReflection;
 import com.moulberry.axiom.VersionHelper;
 import com.moulberry.axiom.buffer.CompressedBlockEntity;
 import com.moulberry.axiom.integration.plotsquared.PlotSquaredIntegration;
@@ -193,7 +194,7 @@ public class RequestChunkDataPacketListener implements PacketHandler {
                         sendingSections.put(pos, container);
 
                         if (sendBlockEntitiesInChunks) {
-                            Set<Map.Entry<BlockPos, BlockEntity>> entrySet = chunk.blockEntities.entrySet();
+                            Set<Map.Entry<BlockPos, BlockEntity>> entrySet = AxiomReflection.getBlockEntities(chunk).entrySet();
                             Iterator<Map.Entry<BlockPos, BlockEntity>> iterator;
                             if (entrySet instanceof Object2ObjectMap.FastEntrySet fastEntrySet) {
                                 iterator = fastEntrySet.fastIterator();

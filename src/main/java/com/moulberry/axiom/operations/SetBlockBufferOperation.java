@@ -283,7 +283,7 @@ public class SetBlockBufferOperation implements PendingOperation {
                                         throw err;
                                     }
                                     try {
-                                        chunk.blockEntities.remove(blockPos);
+                                        AxiomReflection.getBlockEntities(chunk).remove(blockPos);
                                     } catch (Throwable ignored) {}
                                 }
 
@@ -296,7 +296,7 @@ public class SetBlockBufferOperation implements PendingOperation {
                                             throw t2;
                                         }
                                         try {
-                                            chunk.blockEntities.put(blockPos, blockEntity);
+                                            AxiomReflection.getBlockEntities(chunk).put(blockPos, blockEntity);
                                         } catch (Throwable ignored) {}
                                     }
                                 }
@@ -322,7 +322,7 @@ public class SetBlockBufferOperation implements PendingOperation {
                                     throw err;
                                 }
                                 try {
-                                    chunk.blockEntities.remove(blockPos);
+                                    AxiomReflection.getBlockEntities(chunk).remove(blockPos);
                                 } catch (Throwable ignored) {}
                             }
                         }
