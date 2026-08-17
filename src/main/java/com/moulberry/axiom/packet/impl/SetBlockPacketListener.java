@@ -125,13 +125,13 @@ public class SetBlockPacketListener implements PacketHandler {
         Map<Long, Map<BlockPos, BlockState>> blocksByChunk = new LinkedHashMap<>();
         for (Map.Entry<BlockPos, BlockState> entry : blocks.entrySet()) {
             BlockPos pos = entry.getKey();
-            long chunkKey = ChunkPos.asLong(pos.getX() >> 4, pos.getZ() >> 4);
+            long chunkKey = ChunkPos.pack(pos.getX() >> 4, pos.getZ() >> 4);
             blocksByChunk.computeIfAbsent(chunkKey, k -> new LinkedHashMap<>()).put(pos, entry.getValue());
         }
 
         final Set<BlockPos> finalPreventUpdatesAt = preventUpdatesAt;
         final BlockPos clickedPos = blockPlaceContext.getClickedPos();
-        final long clickedChunkKey = ChunkPos.asLong(clickedPos.getX() >> 4, clickedPos.getZ() >> 4);
+        final long clickedChunkKey = ChunkPos.pack(clickedPos.getX() >> 4, clickedPos.getZ() >> 4);
 
         blocksByChunk.forEach((chunkKey, chunkBlocks) -> {
             int cx = ChunkPos.getX(chunkKey);

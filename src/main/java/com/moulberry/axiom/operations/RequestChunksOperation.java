@@ -160,7 +160,7 @@ public class RequestChunksOperation implements PendingOperation {
      * there is no concurrent access.
      */
     private void processChunkOnRegionThread(LevelChunk chunk) {
-        long chunkPosLong = ChunkPos.asLong(chunk.locX, chunk.locZ);
+        long chunkPosLong = ChunkPos.pack(chunk.locX, chunk.locZ);
 
         LongList blockEntitiesInChunk = this.sendBlockEntityForPendingChunks.get(chunkPosLong);
         if (blockEntitiesInChunk != null) {

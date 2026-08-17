@@ -190,7 +190,7 @@ public class SetBlockBufferOperation implements PendingOperation {
         boolean chunkChanged = false;
         boolean chunkLightChanged = false;
 
-        long chunkPosLong = ChunkPos.asLong(chunk.locX, chunk.locZ);
+        long chunkPosLong = ChunkPos.pack(chunk.locX, chunk.locZ);
         List<Long2ObjectMap.Entry<PalettedContainer<BlockState>>> sections = this.sectionsForChunks.get(chunkPosLong);
         for (Long2ObjectMap.Entry<PalettedContainer<BlockState>> entry : sections) {
             int cx = BlockPos.getX(entry.getLongKey());
