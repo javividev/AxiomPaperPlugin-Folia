@@ -113,31 +113,41 @@ public class SetBlockPacketListener implements PacketHandler {
             player.connection.ackBlockChangesUpTo(sequenceId);
         }
 
-        BlockPlaceContext blockPlaceContext = new BlockPlaceContext(player, hand, player.getItemInHand(hand), blockHit);
+        final Set<BlockPos> finalPreventUpdatesAt = preventUpdatesAt;
 
-        if ((reason & REASON_REPLACEMODE) == 0 && (reason & REASON_ANGEL) == 0) {
-            if (!fireBukkitEvents(bukkitPlayer, blockHit, breaking, blocks, player, world, hand)) {
+        // BlockPlaceContext (and firing Bukkit events) reads world state (e.g. level.getBlockState),
+        // which on Folia requires running on the region thread owning the clicked chunk. The packet
+        // itself is handled on the global region thread, so this must be scheduled rather than run inline.
+        BlockPos hitPos = blockHit.getBlockPos();
+        Bukkit.getRegionScheduler().run(this.plugin, bukkitPlayer.getWorld(), hitPos.getX() >> 4, hitPos.getZ() >> 4, ignored -> {
+            if (player.hasDisconnected()) {
                 return;
             }
-        }
 
-        // Update blocks partition-by-chunk for Folia
-        Map<Long, Map<BlockPos, BlockState>> blocksByChunk = new LinkedHashMap<>();
-        for (Map.Entry<BlockPos, BlockState> entry : blocks.entrySet()) {
-            BlockPos pos = entry.getKey();
-            long chunkKey = ChunkPos.pack(pos.getX() >> 4, pos.getZ() >> 4);
-            blocksByChunk.computeIfAbsent(chunkKey, k -> new LinkedHashMap<>()).put(pos, entry.getValue());
-        }
+            BlockPlaceContext blockPlaceContext = new BlockPlaceContext(player, hand, player.getItemInHand(hand), blockHit);
 
-        final Set<BlockPos> finalPreventUpdatesAt = preventUpdatesAt;
-        final BlockPos clickedPos = blockPlaceContext.getClickedPos();
-        final long clickedChunkKey = ChunkPos.pack(clickedPos.getX() >> 4, clickedPos.getZ() >> 4);
+            if ((reason & REASON_REPLACEMODE) == 0 && (reason & REASON_ANGEL) == 0) {
+                if (!fireBukkitEvents(bukkitPlayer, blockHit, breaking, blocks, player, world, hand)) {
+                    return;
+                }
+            }
 
-        blocksByChunk.forEach((chunkKey, chunkBlocks) -> {
-            int cx = ChunkPos.getX(chunkKey);
-            int cz = ChunkPos.getZ(chunkKey);
+            // Update blocks partition-by-chunk for Folia
+            Map<Long, Map<BlockPos, BlockState>> blocksByChunk = new LinkedHashMap<>();
+            for (Map.Entry<BlockPos, BlockState> entry : blocks.entrySet()) {
+                BlockPos pos = entry.getKey();
+                long chunkKey = ChunkPos.pack(pos.getX() >> 4, pos.getZ() >> 4);
+                blocksByChunk.computeIfAbsent(chunkKey, k -> new LinkedHashMap<>()).put(pos, entry.getValue());
+            }
 
-            Bukkit.getRegionScheduler().run(this.plugin, bukkitPlayer.getWorld(), cx, cz, t -> {
+            final BlockPos clickedPos = blockPlaceContext.getClickedPos();
+            final long clickedChunkKey = ChunkPos.pack(clickedPos.getX() >> 4, clickedPos.getZ() >> 4);
+
+            blocksByChunk.forEach((chunkKey, chunkBlocks) -> {
+                int cx = ChunkPos.getX(chunkKey);
+                int cz = ChunkPos.getZ(chunkKey);
+
+                Bukkit.getRegionScheduler().run(this.plugin, bukkitPlayer.getWorld(), cx, cz, t -> {
                 if (updateNeighbors) {
                     if (finalPreventUpdatesAt.isEmpty()) {
                         for (Map.Entry<BlockPos, BlockState> entry : chunkBlocks.entrySet()) {
@@ -250,6 +260,7 @@ public class SetBlockPacketListener implements PacketHandler {
                         }
                     }
                 }
+                });
             });
         });
     }
