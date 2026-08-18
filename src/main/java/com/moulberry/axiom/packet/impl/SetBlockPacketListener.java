@@ -148,6 +148,7 @@ public class SetBlockPacketListener implements PacketHandler {
                 int cz = ChunkPos.getZ(chunkKey);
 
                 Bukkit.getRegionScheduler().run(this.plugin, bukkitPlayer.getWorld(), cx, cz, t -> {
+                try {
                 if (updateNeighbors) {
                     if (finalPreventUpdatesAt.isEmpty()) {
                         for (Map.Entry<BlockPos, BlockState> entry : chunkBlocks.entrySet()) {
@@ -259,6 +260,13 @@ public class SetBlockPacketListener implements PacketHandler {
                             }
                         }
                     }
+                }
+                } catch (Throwable err) {
+                    if (!err.getClass().getName().contains("WrongThreadException") && !err.getClass().getName().contains("TickThread")) {
+                        throw err;
+                    }
+                    AxiomPaper.PLUGIN.getLogger().severe("SetBlock failed on region thread (cross-region block update, likely from a fluid update): " +
+                        (err.getMessage() != null ? err.getMessage() : err.getClass().getSimpleName()));
                 }
                 });
             });
