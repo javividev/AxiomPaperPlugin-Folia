@@ -242,7 +242,10 @@ public class RequestChunkDataPacketListener implements PacketHandler {
     public static void sendResponse(ServerPlayer player, long id, Long2ObjectOpenHashMap<CompressedBlockEntity> sendingBlockEntities,
         Long2ObjectOpenHashMap<PalettedContainer<BlockState>> sendingSections) {
         boolean firstPart = true;
-        int maxSize = 0x100000 - 64; // Leeway of 64 bytes
+        // Kept well under Velocity's observed plugin-message size limit (~229KB for a
+        // ClientboundCustomPayloadPacket on this protocol) - 1MB was too large and caused
+        // Velocity to throw CorruptedFrameException and disconnect the player.
+        int maxSize = 128 * 1024 - 64; // Leeway of 64 bytes
 
         FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
         buf.writeLong(id);

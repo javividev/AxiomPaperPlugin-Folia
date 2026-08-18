@@ -27,7 +27,10 @@ public class ServerBlueprintManager {
         registry = new ServerBlueprintRegistry(map);
     }
 
-    private static final int MAX_SIZE = 1000000;
+    // Kept well under Velocity's observed plugin-message size limit (~229KB for a
+    // ClientboundCustomPayloadPacket on this protocol) - 1MB was too large and caused
+    // Velocity to throw CorruptedFrameException and disconnect the player.
+    private static final int MAX_SIZE = 128 * 1024;
     private static final Identifier PACKET_BLUEPRINT_MANIFEST_IDENTIFIER = VersionHelper.createIdentifier("axiom:blueprint_manifest");
 
     public static void sendManifest(List<ServerPlayer> serverPlayers) {

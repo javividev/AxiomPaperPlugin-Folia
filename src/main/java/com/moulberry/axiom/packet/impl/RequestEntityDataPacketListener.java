@@ -50,7 +50,10 @@ public class RequestEntityDataPacketListener implements PacketHandler {
         List<UUID> request = friendlyByteBuf.readCollection(this.plugin.limitCollection(ArrayList::new), buf -> buf.readUUID());
         ServerLevel serverLevel = player.level();
 
-        final int maxPacketSize = 0x100000;
+        // Kept well under Velocity's observed plugin-message size limit (~229KB for a
+        // ClientboundCustomPayloadPacket on this protocol) - 1MB was too large and caused
+        // Velocity to throw CorruptedFrameException and disconnect the player.
+        final int maxPacketSize = 128 * 1024;
         int remainingBytes = maxPacketSize;
 
         Map<UUID, CompoundTag> entityData = new HashMap<>();
